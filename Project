@@ -1,0 +1,226 @@
+* Project Analysis of Continuous Data; 
+* Bart Moens; 
+* Melissa Bovijn; 
+* Steven Vandeleene; 
+* Herlinde Wynendaele; 
+
+libname Project 'H:\Cont_Data\Project\';  
+
+* Import dataset; 
+proc import OUT= project.FullDataset
+            DATAFILE= "H:\Cont_Data\Project\Project.csv"
+		  dbms=csv replace ;
+	getnames=yes;
+	datarow=2;
+	guessingrows=MAX;
+run; 
+proc print data = project.FullDataset (obs=5);
+run;
+
+* select subset (select covariates, change missing values, set to numeric); 
+
+data Subset;
+	set project.FullDataset;
+	ViolentCrimes = input(ViolentCrimesPerPop, best12.);
+	PolicPop = input(PolicPerPop, best12.);
+	keep state householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+	if ViolentCrimesPerPop="?" then ViolentCrimesPerPop="."; 
+	if PolicPerPop="?" then PolicPerPop="."; 
+	label 
+		state = US state 
+		householdsize = "mean people per household"
+		racepctblack =  "% african american"
+		racePctWhite = "% caucasian"
+		racePctAsian = "% asian heritage"
+		racePctHisp =  "% hispanic heritage"
+		pctUrban = "% in urban areas"
+		NumImmig = " foreign born people"
+		PolicPop =  "police officers per 100K population"
+		ViolentCrimes =  "violent crimes per 100K"
+		;
+run;
+proc print data= Subset (obs=30);
+run;
+
+proc contents data=Subset;
+run;
+
+* Extra datasets creates 
+
+	* Subset_Nomissings: create dataset without missings for ViolentCrimes; 
+	data Subset_NoMissings;
+	set Subset(where=(ViolentCrimes ne .)) ;
+	run;
+
+	* Subset_Log: create dataset with logtransformation for ViolentCrimes and NumImmig; 
+	title 'Taking the log transform';
+	data Subset_Log;
+	  set Subset_NoMissings;
+	  logNumImmig = log(NumImmig+1);    
+	  logViolentCrimes = log(ViolentCrimes+1);
+	run;
+	title; 
+
+	* Subset_Stand: create standardized dataset --> (cave: logtransformatie van NumImmig & ViolentCrimes)  ; 
+	data Subset_Stand;
+	set Subset_Log;
+	zhouseholdsize=householdsize; 
+	zracepctblack=racepctblack; 
+	zracePctWhite=racePctWhite; 
+	zracePctAsian=racePctAsian; 
+	zracePctHisp=racePctHisp; 
+	zpctUrban=pctUrban; 
+		zNumImmig=NumImmig;
+		zlogNumImmig=logNumImmig; 
+	zPolicPop=PolicPop; 
+		zViolentCrimes=ViolentCrimes;
+		zlogViolentCrimes=logViolentCrimes;  
+	run;
+
+	proc standard data=Subset_Stand mean=0 std=1 out=Subset2;
+	var zhouseholdsize zracepctblack zracePctWhite zracePctAsian zracePctHisp zpctUrban	zNumImmig zPolicPop	zViolentCrimes zlogNumImmig zlogViolentCrimes; 
+	run;
+
+
+
+
+
+/* Step 1: Descriptives */
+
+/* Univariate exploration of the data */
+		* Quick check missing/invalid data; 
+		proc format;
+		 value missing low-high = 'Value'
+		                  other = 'Missing';
+		 value $missing ' ' = 'Missing'
+		              other = 'Value';
+		run;
+		proc freq data=Subset;
+		 tables _all_/missing;
+		 format _character_ $missing. _numeric_ missing.;
+		 title 'Quick QC Check';
+		run;
+
+	*1A. Continuous variables;
+		* Check aantal, missing; 
+		proc means data = Subset n nmiss;
+			var householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+		run;
+
+		ods select MissPattern;
+		proc mi data=Subset nimpute=0;
+		var householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+		run; 
+
+			* police officers per 100K population --> 1872 missing values; 
+			* total number of violent crimes per 100K population --> 221; 
+
+		* Check summary of data ; 
+		proc means data = Subset n mean max min std median P25 P75 skewness;
+			var householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+		run;
+
+		* Check normaal verdeling; 
+		proc univariate plot data = Subset;
+			var householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+			histogram householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes/Normal; 
+			inset mean std; 
+			qqplot householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes; 
+		run;
+
+	*1B. Categorical variables;
+
+		proc freq data = Subset ORDER=FREQ ;
+		   tables state /nocum missing plots=freqplot ;
+		run;
+
+/* bivariate relationships */
+
+	/* Scatterplot & correlation for continuous variables */
+		proc sgscatter data=Subset;
+		  matrix householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+		run;
+
+		proc corr data=Subset;
+		var householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes;
+		run;
+
+	/* Boxplots for continuous versus categorical variable */
+		data Subset_ByState;
+		set Subset;
+		run;
+
+		proc sort data=Subset_ByState;
+		by state;
+		run;
+
+		proc boxplot data=Subset_ByState;
+		plot (householdsize racepctblack racePctWhite racePctAsian racePctHisp pctUrban NumImmig PolicPop ViolentCrimes)*state;
+		run;
+	
+	* Explore relationship between NumImmig and ViolentCrimes; 
+
+		Title "Explore relationship between NumImmig and ViolentCrimes";
+		PROC sgplot data= Subset; 
+		scatter X=NumImmig Y= ViolentCrimes; 
+		run; 
+		title; 
+
+		Title "Explore relationship between NumImmig and ViolentCrimes per state";
+		PROC sgplot data= Subset; 
+		scatter X=NumImmig Y= ViolentCrimes/group = state; 
+		run; 
+		Title; 
+
+		PROC corr data=Subset; 
+		var NumImmig ViolentCrimes; 
+		run; 
+		
+		proc loess data=Subset;
+			model ViolentCrimes=NumImmig / smooth=0.75;
+			ods output OutputStatistics=Results;
+		run;
+
+		proc sort data=Results; 
+		by NumImmig; 
+		run; 
+
+		Title "Linearity?";
+		proc gplot data=Results; 
+		plot  DepVar*NumImmig Pred*NumImmig/overlay;  
+		symbol1 c=gray v=dot h=1 mode=include; 
+		symbol2 c=black i=join w=1 mode=include; 
+		run; 
+		title; 
+
+* Simple linear model; 
+		* Check verdeling variabelen nogmaals; 
+			proc univariate plot data = Subset_NoMissings;
+			var NumImmig ViolentCrimes;
+			histogram NumImmig ViolentCrimes/Normal; 
+			inset mean std; 
+			run;
+		* Log nemen van beide variabelen (zie onderdeel subsets datasest: subset_Log); 
+
+title 'Looking at the regular diagnostics after logtransformation';
+		proc reg data=Subset_Log;
+		  model logViolentCrimes = logNumImmig/r clb clm cli;
+		run;
+		quit;
+		title; 
+		* Cave: veel output; 
+		
+		title"influential diagnostics";
+		proc reg data=Subset_Log;
+		  model logViolentCrimes = logNumImmig/r influence;
+		  output out=residuals rstudent=rstud p=pred;
+		run;
+		title; 
+
+/* Step 2: Exploring the model with all main effects included */
+	* Center the data (zie ondereel subsets dataset: subset_stand); 
+	* Categorical variable state --> recode? 
+
+	
+
+
